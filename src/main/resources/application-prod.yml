@@ -1,0 +1,33 @@
+# =============================================================================
+# PROD profile — all sensitive values MUST come from environment variables.
+# Start with: SPRING_PROFILES_ACTIVE=prod java -jar chat-app.jar
+# =============================================================================
+spring:
+  datasource:
+    # No defaults on purpose: fail fast if the environment is not configured.
+    url: ${DB_URL}
+    username: ${DB_USER}
+    password: ${DB_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: ${DB_POOL_MAX:20}
+      minimum-idle: ${DB_POOL_MIN:5}
+
+  jpa:
+    show-sql: false
+
+  data:
+    redis:
+      host: ${REDIS_HOST}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+
+server:
+  # In production this app is expected to sit behind a TLS-terminating proxy.
+  # See README ("Enabling HTTPS/TLS") for the reverse-proxy + certificate setup.
+  forward-headers-strategy: framework
+
+logging:
+  level:
+    root: INFO
+    com.cloudzone.chatapp: INFO

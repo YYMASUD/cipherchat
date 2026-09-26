@@ -1,0 +1,55 @@
+# =============================================================================
+# Local development infrastructure for chat-app.
+#
+# Start:   docker compose up -d
+# Stop:    docker compose down
+# Reset:   docker compose down -v   (also deletes the postgres data volume)
+# Logs:    docker compose logs -f postgres
+#
+# The credentials below match application-dev.yml defaults.
+# =============================================================================
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: chatapp-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: chatapp
+      POSTGRES_USER: chatapp
+      POSTGRES_PASSWORD: chatapp
+      # Ensure deterministic collation for indexes / equality checks.
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    ports:
+      - "5432:5432"
+    volumes:
+      - chatapp-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chatapp -d chatapp"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ---------------------------------------------------------------------------
+  # Redis: used from Phase 6 for online presence + offline message handling.
+  # Safe to leave running from the start; the app only connects when used.
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: chatapp-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - chatapp-redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+volumes:
+  chatapp-pgdata:
+  chatapp-redisdata:

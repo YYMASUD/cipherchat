@@ -1,0 +1,101 @@
+# =============================================================================
+# Base configuration (shared by all profiles).
+# Profile-specific overrides live in application-<profile>.yml
+# Default profile is "dev" (see spring.profiles.active below).
+# =============================================================================
+spring:
+  application:
+    name: chat-app
+
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:dev}
+
+  # ---------------------------------------------------------------------------
+  # JPA / Hibernate
+  # ---------------------------------------------------------------------------
+  jpa:
+    # 'open-in-view' disabled on purpose: keeps lazy loading out of the web layer,
+    # forcing explicit fetching in services/mappers (avoids accidental N+1 in views).
+    open-in-view: false
+    # Schema is owned by Flyway once migrations exist, so Hibernate never touches DDL.
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+        format_sql: true
+
+  # ---------------------------------------------------------------------------
+  # Flyway (database migrations)
+  # ---------------------------------------------------------------------------
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+    # Phase 1 has no migration scripts yet; keep this false so an empty
+    # migration folder does not abort startup. We will add V1__*.sql in Phase 2.
+    fail-on-missing-locations: false
+
+  # ---------------------------------------------------------------------------
+  # Redis (used from Phase 6 for presence + offline delivery; harmless if unused)
+  # ---------------------------------------------------------------------------
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+
+  # ---------------------------------------------------------------------------
+  # Jackson
+  # ---------------------------------------------------------------------------
+  jackson:
+    default-property-inclusion: non_null
+    serialization:
+      write-dates-as-timestamps: false
+
+# -----------------------------------------------------------------------------
+# Server / Actuator
+# -----------------------------------------------------------------------------
+server:
+  port: ${SERVER_PORT:8080}
+  error:
+    include-message: always
+    include-binding-errors: always
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  health:
+    # Redis is not used until Phase 6 (and may not be running in Phase 1),
+    # so its health indicator is disabled to keep /actuator/health green.
+    redis:
+      enabled: false
+
+# -----------------------------------------------------------------------------
+# Application-specific settings (consumed from Phase 2 onward)
+# -----------------------------------------------------------------------------
+app:
+  jwt:
+    # MUST be overridden in production via the JWT_SECRET env var.
+    # Base64-encoded secret, at least 256 bits for HS256.
+    secret: ${JWT_SECRET:Y2hhbmdlLW1lLWluLXByb2R1Y3Rpb24tcmVwbGFjZS10aGlzLXNlY3JldC12YWx1ZQ==}
+    # Access token lifetime in milliseconds (default 15 minutes)
+    access-token-ttl: ${JWT_ACCESS_TTL:900000}
+    # Refresh token lifetime in milliseconds (default 7 days)
+    refresh-token-ttl: ${JWT_REFRESH_TTL:604800000}
+    issuer: ${JWT_ISSUER:chat-app}
+
+  cors:
+    # Comma-separated list of allowed origins (Vite dev server default is 5173).
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:3000}
+
+  # Whisper: message size guard (characters of ciphertext payload), adjust per need.
+  messaging:
+    max-payload-chars: ${MSG_MAX_PAYLOAD:65536}
+
+logging:
+  level:
+    root: INFO
+    com.cloudzone.chatapp: DEBUG

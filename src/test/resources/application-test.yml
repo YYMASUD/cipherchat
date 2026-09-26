@@ -1,0 +1,32 @@
+# =============================================================================
+# TEST profile — in-memory H2 in PostgreSQL-compatibility mode.
+# Activated by tests via @ActiveProfiles("test") so the suite runs with no
+# Docker/PostgreSQL. Dev/prod always use the real PostgreSQL (see other profiles).
+# =============================================================================
+spring:
+  datasource:
+    url: jdbc:h2:mem:chatapp;MODE=PostgreSQL;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+    username: sa
+    password: ""
+    driver-class-name: org.h2.Driver
+
+  jpa:
+    hibernate:
+      # Tests create the schema from entities; Flyway SQL migrations are written
+      # for PostgreSQL and are skipped here.
+      ddl-auto: create-drop
+    show-sql: false
+
+  flyway:
+    enabled: false
+
+  data:
+    redis:
+      # No Redis in tests (Phase 1). Presence/offline features land in Phase 6.
+      repositories:
+        enabled: false
+
+logging:
+  level:
+    root: WARN
+    com.cloudzone.chatapp: INFO

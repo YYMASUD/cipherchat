@@ -1,0 +1,26 @@
+# =============================================================================
+# DEV profile — local development against docker-compose (PostgreSQL + Redis).
+# Run with: mvnw spring-boot:run  (SPRING_PROFILES_ACTIVE defaults to "dev").
+# =============================================================================
+spring:
+  datasource:
+    # Works with either docker-compose (local) or an external managed PostgreSQL
+    # (e.g. Aiven). For managed providers SSL is required: set DB_SSLMODE=require.
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:chatapp}?sslmode=${DB_SSLMODE:prefer}
+    username: ${DB_USER:chatapp}
+    # Never commit real passwords: set DB_PASSWORD as an environment variable
+    # (or in a .env file, which is git-ignored).
+    password: ${DB_PASSWORD:chatapp}
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    # In dev it is convenient to see the SQL that Hibernate/Flyway emit.
+    show-sql: true
+
+  # Redis points at the docker-compose instance by default (set in application.yml).
+
+logging:
+  level:
+    com.cloudzone.chatapp: DEBUG
+    org.springframework.web: INFO
+    org.hibernate.SQL: DEBUG
