@@ -32,13 +32,11 @@ spring:
   flyway:
     enabled: true
     locations: classpath:db/migration
-    baseline-on-migrate: true
-    # Phase 1 has no migration scripts yet; keep this false so an empty
-    # migration folder does not abort startup. We will add V1__*.sql in Phase 2.
-    fail-on-missing-locations: false
+    baseline-on-migrate: false
+    fail-on-missing-locations: true
 
   # ---------------------------------------------------------------------------
-  # Redis (used from Phase 6 for presence + offline delivery; harmless if unused)
+  # Redis (optional shared presence and event distribution)
   # ---------------------------------------------------------------------------
   data:
     redis:
@@ -59,8 +57,8 @@ spring:
 server:
   port: ${SERVER_PORT:8080}
   error:
-    include-message: always
-    include-binding-errors: always
+    include-message: never
+    include-binding-errors: never
 
 management:
   endpoints:
@@ -68,15 +66,16 @@ management:
       exposure:
         include: health,info
   health:
-    # Redis is not used until Phase 6 (and may not be running in Phase 1),
-    # so its health indicator is disabled to keep /actuator/health green.
+    # Local realtime mode does not require Redis.
     redis:
       enabled: false
 
 # -----------------------------------------------------------------------------
-# Application-specific settings (consumed from Phase 2 onward)
+# Application-specific settings
 # -----------------------------------------------------------------------------
 app:
+  realtime:
+    redis-enabled: ${REALTIME_REDIS_ENABLED:false}
   jwt:
     # MUST be overridden in production via the JWT_SECRET env var.
     # Base64-encoded secret, at least 256 bits for HS256.
@@ -89,7 +88,7 @@ app:
 
   cors:
     # Comma-separated list of allowed origins (Vite dev server default is 5173).
-    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:3000}
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000}
 
   # Whisper: message size guard (characters of ciphertext payload), adjust per need.
   messaging:

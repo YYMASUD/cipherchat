@@ -31,8 +31,8 @@ services:
       start_period: 10s
 
   # ---------------------------------------------------------------------------
-  # Redis: used from Phase 6 for online presence + offline message handling.
-  # Safe to leave running from the start; the app only connects when used.
+  # Redis: optional shared presence and cross-instance realtime events.
+  # Set REALTIME_REDIS_ENABLED=true to enable it in the backend.
   # ---------------------------------------------------------------------------
   redis:
     image: redis:7-alpine

@@ -1,219 +1,200 @@
-# chat-app — Real-Time End-to-End Encrypted Chat
+# CipherChat
 
-A production-oriented, multi-user real-time chat application where message
-plaintext **never** reaches the server. Messages are encrypted on the client
-(Web Crypto API) and the backend only ever stores/forwards ciphertext.
+A direct-message application with client-side end-to-end encryption, a Java 21 /
+Spring Boot 3.4 backend, PostgreSQL persistence, and a React 18 / Vite frontend.
+The backend accepts and persists encrypted message envelopes, never message text.
 
-> **Project status: Phase 1 (Foundation) complete.**
-> See [Build phases](#build-phases) — the app is built incrementally.
+## Implemented features
 
----
+- Registration, login, BCrypt hashing, JWT access tokens, rotating opaque refresh
+  tokens stored as SHA-256 hashes, and refresh-token logout/revocation.
+- Case-insensitive usernames, bounded user search, direct conversations, participant
+  authorization, paginated history, and idempotent message submission.
+- Authenticated native WebSocket/STOMP private events with restricted subscriptions
+  and destinations. Connections close when their access token expires.
+- AES-256-GCM per-message encryption; RSA-OAEP/SHA-256 wraps each AES key separately
+  for sender and recipient. Client message IDs are authenticated as associated data.
+- Password-encrypted private keys in IndexedDB using PBKDF2/SHA-256 (600,000
+  iterations), AES-GCM, and random salts/IVs. Decrypted session keys and tokens stay
+  in memory. Reloading requires signing in and unlocking again.
+- Encrypted key backup download/import, key-pair verification on restore, pinned
+  contact keys (TOFU), and SHA-256 public-key fingerprints for manual verification.
+- Typing indicators, online presence, delivery/read receipts, reconnect refresh,
+  periodic database reconciliation, and a persistent ciphertext-only outbox.
+- Optional Redis Pub/Sub for cross-instance events and expiring presence leases.
+  Local mode needs no Redis. PostgreSQL history is authoritative when events are
+  missed. The UI polls every 15 seconds as a fallback.
+- Responsive UI, validation, per-instance authentication/message rate limits,
+  Flyway migrations, API integration tests, socket tests, and cryptographic tests.
 
-## Tech stack
+## Requirements and startup
 
-| Layer      | Technology |
-|------------|------------|
-| Backend    | Java 21 · Spring Boot **3.4.x** · Spring Web · Spring Security · Spring Data JPA · WebSocket/STOMP |
-| Database   | PostgreSQL 16 (Flyway migrations) |
-| Cache/PubSub | Redis 7 *(used from Phase 6)* |
-| Auth       | JWT (access + refresh) via `io.jsonwebtoken`, BCrypt password hashing |
-| Mapping    | MapStruct 1.6.3 · Lombok |
-| Frontend   | React 18 + Vite · Web Crypto API · STOMP.js/SockJS · Axios · TailwindCSS *(Phase 4+)* |
-| Infra      | Docker Compose (PostgreSQL + Redis) |
+- JDK 21 (Java 8 on PATH will not work).
+- PostgreSQL 16; Docker Compose can start PostgreSQL and Redis.
+- Node.js 20.19+ or a supported newer LTS for the frontend toolchain.
 
----
+From `D:/Code/Webchat/chat-app`:
 
-## Requirements
-
-- **JDK 21** (the build targets Java 21)
-- **Docker Desktop** (for PostgreSQL + Redis) — or an existing PostgreSQL 16 instance
-- **Node.js 18+** *(only needed from Phase 4 for the frontend)*
-
-> ⚠️ **JDK note:** this machine's `java` on PATH is Java 8. Always build with the
-> project's JDK 21 (IntelliJ uses `ms-21`). For CLI builds set `JAVA_HOME` first:
-> ```powershell
-> $env:JAVA_HOME = "C:\Users\CloudZone\.jdks\ms-21.0.12.1"
-> ```
-
----
-
-## Quick start
-
-### 1. Start the database
-
-```bash
-docker compose up -d
-```
-
-This starts:
-- **PostgreSQL** on `localhost:5432` — db `chatapp`, user `chatapp`, password `chatapp`
-- **Redis** on `localhost:6379`
-
-Check health: `docker compose ps`
-
-### 2. Run the backend
-
-**From IntelliJ IDEA:** open the project (it already points at the `ms-21` SDK) and
-run `ChatAppApplication`. The default profile is `dev`.
-
-**From the command line (Windows):**
 ```powershell
-$env:JAVA_HOME = "C:\Users\CloudZone\.jdks\ms-21.0.12.1"
-cd D:/Code/Webchat/chat-app
+docker compose up -d
+$env:JAVA_HOME = 'C:/Users/CloudZone/.jdks/ms-21.0.12.1'
 .\mvnw.cmd spring-boot:run
 ```
 
-The app starts on **http://localhost:8080**.
-
-### 3. Verify it is up
+Use your own JDK path if different. In a second terminal:
 
 ```powershell
-# App health (expect {"status":"UP", ...})
-Invoke-RestMethod http://localhost:8080/actuator/health
+Set-Location D:/Code/Webchat/chat-app/frontend
+npm ci
+npm run dev
 ```
 
----
+Open **http://localhost:5173**. Vite proxies `/api` and `/ws` to port 8080.
+Health is at **http://localhost:8080/actuator/health**. Create two accounts in
+separate browser profiles, download both encrypted key backups, search for the
+other account, and start a conversation.
+
+If Docker is unavailable, provide an existing PostgreSQL instance through the
+environment variables below. Redis is optional in development.
+
+## Key recovery: read before using
+
+Download the **encrypted key backup** after registration and keep it safe. On
+another browser, choose that file on the login screen and enter the same account
+password. The backup is checked against the account's public key and the
+private/public pair is verified before use.
+
+The private key is not uploaded. There is no server-side password reset or key
+recovery. Losing both IndexedDB data and the backup permanently loses access to
+encrypted history. Never silently regenerate keys for an existing account.
+The outbox contains ciphertext only and resumes after signing into the same account.
+Signing out retains encrypted identity and pending-message data locally.
 
 ## Configuration
 
-Configuration is YAML-based with one file per profile:
+Profiles: `dev` (default), `prod`, and `test`. See `.env.example`; Spring does
+**not** automatically load that file. Export variables or set IDE run configuration
+values. Do not commit real credentials.
 
-| File | Purpose |
-|------|---------|
-| `src/main/resources/application.yml` | Base settings shared by all profiles |
-| `application-dev.yml` | Local dev → docker-compose PostgreSQL + Redis, debug logging |
-| `application-prod.yml` | Production → all secrets from environment variables, no defaults |
-| `src/test/resources/application-test.yml` | Tests → in-memory H2 (PostgreSQL mode), no Docker needed |
+| Variable | Default / purpose |
+|---|---|
+| `SERVER_PORT` | `8080` |
+| `SPRING_PROFILES_ACTIVE` | `dev` |
+| `DB_HOST`, `DB_PORT`, `DB_NAME` | Dev: `localhost`, `5432`, `chatapp` |
+| `DB_USER`, `DB_PASSWORD` | Dev: `chatapp` / `chatapp`; required in prod |
+| `DB_SSLMODE` | Dev: `prefer`; configure trusted TLS for remote databases |
+| `DB_URL` | Required production JDBC PostgreSQL URL |
+| `JWT_SECRET` | Base64 HS256 secret, at least 32 random bytes; required in prod |
+| `JWT_ISSUER` | `chat-app` |
+| `JWT_ACCESS_TTL`, `JWT_REFRESH_TTL` | `900000`, `604800000` milliseconds |
+| `CORS_ALLOWED_ORIGINS` | Local Vite origins and localhost:3000; override in prod |
+| `MSG_MAX_PAYLOAD` | `65536` ciphertext characters; DTO hard cap is also 65536 |
+| `REALTIME_REDIS_ENABLED` | `false` in dev, `true` in prod |
+| `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD` | Host required in prod; port `6379`, optional password |
+| `DB_POOL_MAX`, `DB_POOL_MIN` | Production: `20`, `5` |
 
-Select a profile with `SPRING_PROFILES_ACTIVE` (defaults to `dev`).
+Generate a secret in PowerShell:
 
-### Environment variables
-
-| Variable | Default (dev) | Description |
-|----------|---------------|-------------|
-| `SPRING_PROFILES_ACTIVE` | `dev` | Active profile |
-| `DB_HOST` / `DB_PORT` / `DB_NAME` | `localhost` / `5432` / `chatapp` | PostgreSQL (dev) |
-| `DB_USER` / `DB_PASSWORD` | `chatapp` / `chatapp` | PostgreSQL credentials (dev) |
-| `DB_URL` / `DB_USER` / `DB_PASSWORD` | *(none)* | Required in `prod` |
-| `REDIS_HOST` / `REDIS_PORT` | `localhost` / `6379` | Redis connection |
-| `JWT_SECRET` | dev placeholder | **Base64** HS256 secret (≥256 bits). Override in prod! |
-| `JWT_ACCESS_TTL` | `900000` (15 min) | Access token lifetime (ms) |
-| `JWT_REFRESH_TTL` | `604800000` (7 days) | Refresh token lifetime (ms) |
-| `CORS_ALLOWED_ORIGINS` | `http://localhost:5173,http://localhost:3000` | Comma-separated allowed origins |
-
-> The JWT settings are read from Phase 2 onward; they are present now so the
-> configuration surface is complete and testable.
-
----
-
-## Project layout
-
-```
-chat-app/
-├── docker-compose.yml                 # PostgreSQL + Redis for local dev
-├── pom.xml                            # Maven build (Java 21, Spring Boot 3.4.x)
-├── src/
-│   ├── main/
-│   │   ├── java/com/cloudzone/chatapp/
-│   │   │   ├── ChatAppApplication.java
-│   │   │   ├── config/                # Security, CORS, WebSocket, Redis (later phases)
-│   │   │   ├── controller/            # REST + WebSocket controllers
-│   │   │   ├── service/               # Business logic
-│   │   │   ├── repository/            # Spring Data JPA repositories
-│   │   │   ├── entity/                # JPA entities
-│   │   │   ├── dto/                   # Request/response DTOs
-│   │   │   ├── mapper/                # MapStruct mappers
-│   │   │   ├── security/              # JWT filter, token provider, user details
-│   │   │   └── exception/             # Global exception handler + custom exceptions
-│   │   └── resources/
-│   │       ├── application*.yml        # Profile configuration
-│   │       └── db/migration/           # Flyway SQL migrations
-│   └── test/
-│       ├── java/com/cloudzone/chatapp/ # Unit + integration tests
-│       └── resources/application-test.yml
-└── frontend/                          # React + Vite app (Phase 4+)
+```powershell
+$bytes = New-Object byte[] 32
+$rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+$rng.GetBytes($bytes)
+[Convert]::ToBase64String($bytes)
+$rng.Dispose()
 ```
 
----
+Flyway owns the schema (`V1__init_schema.sql`); Hibernate validates it. Tests run
+the same migration on H2 in PostgreSQL compatibility mode. No destructive schema
+updates or automatic baselining are enabled.
 
-## E2EE design (how it will work)
+## REST API
 
-> Implemented in **Phase 5**; documented here so the architecture is clear up front.
+All endpoints except auth and health require `Authorization: Bearer <accessToken>`.
+Requests are JSON. Null response fields are omitted. Errors use `{ "message": "..." }`.
 
-**Key model — hybrid encryption:**
+| Method / path | Request or behavior |
+|---|---|
+| `POST /api/auth/register` | `{ username, password, publicKey }`; tokens + user, status 201 |
+| `POST /api/auth/login` | `{ username, password }`; `{ accessToken, refreshToken, user }` |
+| `POST /api/auth/refresh` | `{ refreshToken }`; consumes old token and returns new pair |
+| `POST /api/auth/logout` | `{ refreshToken }`; revokes it, status 204 |
+| `GET /api/users/me` | Current public profile |
+| `GET /api/users?q=prefix` | Up to 20 users, excluding self |
+| `GET /api/users/{id}/public-key` | `{ id, username, publicKey }` (Base64 SPKI) |
+| `GET /api/conversations?page=0` | Up to 50 `{ id, peer, createdAt, online }` |
+| `POST /api/conversations` | `{ userId }`; existing or new direct conversation |
+| `GET /api/conversations/{id}/messages?page=0` | `{ messages, hasMore }`, 50 newest first |
+| `POST /api/conversations/{id}/messages` | `{ clientId, ciphertext, iv, recipientKey, senderKey }` |
+| `POST /api/conversations/receipts` | `{ messageId, read }`; recipient only |
 
-1. **At registration (client side):** the browser generates an **RSA-OAEP** key pair.
-   Only the **public key** is uploaded to the server. The **private key** is stored
-   in the browser's **IndexedDB**, encrypted with an **AES-GCM** key derived from
-   the user's password via **PBKDF2**. The plaintext private key never leaves the device.
-2. **To send a message:**
-   - fetch the recipient's public key from `GET /api/users/{id}/public-key`;
-   - generate a random **AES-GCM** key (per message) and a unique **IV**;
-   - encrypt the message body with AES-GCM;
-   - encrypt that AES key with the recipient's **RSA-OAEP** public key;
-   - send only `{ ciphertext, encryptedSymmetricKey, iv }` to the server.
-3. **The server** persists and forwards ciphertext only — it holds no private key
-   and therefore cannot decrypt anything.
-4. **The recipient** decrypts the AES key with their RSA private key, then decrypts
-   the message. The AES key is also wrapped with the *sender's* public key so the
-   sender can read their own sent history.
+Messages include `id`, `conversationId`, `senderId`, `clientId`, encrypted envelope
+fields, `createdAt`, and optional `deliveredAt` / `readAt`. Binary fields use standard
+Base64; IVs are 12 bytes. Reusing a sender's client ID returns the original message.
+A concurrent creation may return 409: retry the same request after the winner commits.
+History uses offset pagination; concurrent inserts can shift page boundaries, so
+clients deduplicate by message ID. Older history is loaded manually in the UI.
 
-**Security trade-offs made for simplicity (documented honestly):**
-- The server enforces auth and rate limits but is assumed **honest-but-curious**;
-  it is explicitly *not* trusted with plaintext, but it can still observe metadata
-  (who talks to whom, when, message sizes).
-- There is **no forward secrecy** (a compromised long-lived private key exposes past
-  messages). A future enhancement is the Double Ratchet / X3DH (as in Signal).
-- Key verification is **TOFU** (trust-on-first-use); no out-of-band fingerprint
-  verification is enforced in the base build.
+## WebSocket contract
 
----
+Use native WebSocket `/ws` (no SockJS dependency). STOMP `CONNECT` must include
+`Authorization: Bearer ...`. Subscribe **only** to `/user/queue/events`.
+Events are `{ type, data }`: `message`, `receipt`, `conversation`, `typing`, or `error`.
+Messages/receipts contain message responses. Typing contains `conversationId`,
+`userId`, and `typing`. Send typing to `/app/typing` with `{ conversationId, typing }`.
+Messages and receipts use REST for acknowledgements and safe retries.
+Clients cannot publish to broker queues or subscribe to another user's queue.
 
-## Frontend (Phase 4+)
+Presence is best effort: Redis mode renews a 25-second lease every 10 seconds.
+Disconnects may take up to 25 seconds to appear offline. Delivery means a recipient
+client acknowledged an envelope; read means its conversation was open in a visible
+document, not proof that a human actually read it.
 
-A React 18 + Vite app will live in `/frontend` with registration, login, chat UI,
-and the client-side E2EE implementation. Run it with `npm install && npm run dev`
-(default Vite port **5173**, already allowed in CORS).
+## Testing and build
 
----
-
-## Testing
-
-```bash
-# All tests (no Docker required — uses in-memory H2)
-.\mvnw.cmd test
+```powershell
+$env:JAVA_HOME = 'C:/Users/CloudZone/.jdks/ms-21.0.12.1'
+.\mvnw.cmd clean verify
+Set-Location D:/Code/Webchat/chat-app/frontend
+npm ci
+npm test
+npm run build
+npm audit
 ```
 
-- `ChatAppApplicationTests` — smoke test that the Spring context boots.
-- From Phase 2: auth tests (register/login/refresh). From Phase 3: messaging tests.
+Backend tests cover migrations, authentication, token rotation/revocation,
+expiry/signatures/issuer, search, membership isolation, idempotency, receipts,
+payload validation, live socket delivery, and forbidden subscriptions. Frontend
+Node tests execute real Web Crypto encryption, backup restoration, wrong-password
+rejection, sender/recipient decryption, and tamper rejection. Browser interaction
+and multi-node Redis/PostgreSQL behavior still require deployment-level testing.
 
----
+## Production deployment and security boundaries
 
-## Build phases
+1. Set `prod` and required database/JWT/Redis variables. Use a random JWT secret
+   and explicitly set CORS to your HTTPS frontend origin.
+2. Build with `mvnw.cmd package`; run `java -jar target/chat-app-0.0.1-SNAPSHOT.jar`.
+3. Build the frontend and serve `frontend/dist` from a reverse proxy. Proxy `/api/`
+   and `/ws` to the backend, preserving WebSocket Upgrade/Connection headers.
+4. Terminate TLS, redirect HTTP to HTTPS, and use WSS. Trust forwarded headers only
+   from that proxy; keep the backend, Redis, and PostgreSQL off the public network.
+5. Add a restrictive frontend CSP, body limits, connection quotas, and shared edge
+   rate limiting. Back up PostgreSQL and secure Redis access.
 
-| Phase | Scope | Status |
-|-------|-------|--------|
-| **1** | Foundation: pom, `application.yml`, Docker Compose, app boots | ✅ **Done** |
-| 2 | User auth: entity, Flyway, register/login, Spring Security + JWT | ⏳ |
-| 3 | Real-time chat: WebSocket/STOMP, conversations & messages (plaintext first) | ⏳ |
-| 4 | Frontend: React + Vite, register/login, chat UI | ⏳ |
-| 5 | E2EE: client key generation, AES-GCM + RSA-OAEP, IndexedDB key storage | ⏳ |
-| 6 | Enhancements: presence, typing, delivery/read, Redis, offline, tests, docs | ⏳ |
+Important limitations:
 
----
+- No forward secrecy, Double Ratchet, or cryptographic sender signatures. The
+  server is assumed honest-but-curious; first-use keys need independent fingerprint
+  verification to resist a malicious server. E2EE does not hide metadata.
+- Compromised browsers, XSS, or malicious frontend deployments can read unlocked
+  data. Passwords reach the authentication server over TLS; this does not protect
+  against a malicious authentication server.
+- Logout revokes refresh tokens; issued access tokens/sockets remain valid until
+  short expiry. Tokens are not persisted across reloads.
+- Rate limits are per instance. Redis Pub/Sub is transient; history polling and
+  outbox retries supply eventual recovery, not a durable event queue. Redis must
+  be reachable at startup when shared mode is enabled.
+- Password reset/change, attachments, groups, calls, and key rotation are outside
+  the documented direct-chat scope and are not implemented.
 
-## Enabling HTTPS/TLS (production)
-
-The app itself speaks plain HTTP and is meant to run **behind a TLS-terminating
-reverse proxy** (Nginx, Caddy, Traefik, or a cloud load balancer):
-
-1. Obtain a certificate (e.g. Let's Encrypt / `certbot`).
-2. Configure the proxy to terminate TLS on `443` and forward to the app on `8080`,
-   setting `X-Forwarded-Proto`/`X-Forwarded-For` headers.
-3. The app already sets `server.forward-headers-strategy: framework` in the `prod`
-   profile, so it respects those headers (correct secure-cookie / redirect decisions).
-4. Redirect all `80` → `443`. Use `wss://` for the WebSocket endpoint (`/ws`).
-
-> Never run this app over plain HTTP in production: with E2EE the *payload* is safe,
-> but JWTs and refresh tokens still travel in headers/cookies and must be protected
-> in transit.
+This covers the original phases 2–6, not an independently audited production
+cryptosystem.

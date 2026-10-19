@@ -12,17 +12,16 @@ spring:
 
   jpa:
     hibernate:
-      # Tests create the schema from entities; Flyway SQL migrations are written
-      # for PostgreSQL and are skipped here.
-      ddl-auto: create-drop
+      # Run the actual Flyway migration and validate entity/schema compatibility.
+      ddl-auto: validate
     show-sql: false
 
   flyway:
-    enabled: false
+    enabled: true
 
   data:
     redis:
-      # No Redis in tests (Phase 1). Presence/offline features land in Phase 6.
+      # Tests use local presence and events without a Redis process.
       repositories:
         enabled: false
 

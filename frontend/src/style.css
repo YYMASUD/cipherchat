@@ -1,0 +1,63 @@
+:root { font-family: Inter, system-ui, sans-serif; color: #e6edf8; background: #0b1020; font-synthesis: none; color-scheme: dark; }
+* { box-sizing: border-box; }
+body { margin: 0; }
+button, input, textarea { font: inherit; }
+button { background: #7775ed; color: white; border: 0; border-radius: 9px; padding: .8rem 1rem; cursor: pointer; }
+button:hover { filter: brightness(1.12); }
+button:disabled { opacity: .5; cursor: not-allowed; }
+input, textarea { width: 100%; background: #0b1223; border: 1px solid #35415b; color: #f1f5ff; border-radius: 8px; padding: .8rem; margin-top: .4rem; }
+input:focus, textarea:focus, button:focus-visible { outline: 2px solid #9c9aff; outline-offset: 2px; }
+label { display: block; font-size: .9rem; margin: 1rem 0; }
+p { line-height: 1.6; }
+small, .hint { color: #9baac3; font-size: .78rem; }
+.brand { font-size: 1.45rem; font-weight: 750; color: #b4b1ff; }
+.auth-shell { min-height: 100dvh; display: grid; place-items: center; padding: 2rem 1rem; background: radial-gradient(ellipse at top, #222441, #0b1020 65%); }
+.auth-card { max-width: 470px; width: 100%; padding: 2rem; background: #131c30; border: 1px solid #2d3651; border-radius: 20px; }
+.auth-card h1 { font-size: 1.8rem; }
+.auth-card form > button { width: 100%; }
+.link { color: #b4b1ff; background: transparent; padding: .7rem 0; font-size: .9rem; }
+.secondary { background: #26304a; font-size: .85rem; }
+.notice { color: #e1d29f; font-size: .85rem; background: #302b22; padding: .8rem; border-radius: 8px; }
+.error { color: #ffb7bc; background: #3b202d; padding: .8rem; border-radius: 8px; overflow-wrap: anywhere; }
+.banner { display: flex; align-items: center; gap: 1rem; padding: .6rem 1rem; margin: .5rem; }
+.banner button { margin-left: auto; }
+.chat-shell { display: flex; height: 100dvh; }
+.sidebar { width: 300px; flex-shrink: 0; padding: 1.5rem; background: #131b2e; border-right: 1px solid #2b344a; display: flex; flex-direction: column; overflow-y: auto; }
+.account { display: flex; justify-content: space-between; flex-wrap: wrap; gap: .5rem; margin: 1.5rem 0; font-size: .85rem; }
+.online { color: #7fe0b8; }
+.offline { color: #9baac3; }
+.conversation { display: flex; justify-content: space-between; gap: .5rem; width: 100%; text-align: left; background: transparent; margin-bottom: .5rem; }
+.conversation.selected { background: #353457; }
+.logout { margin-top: auto; text-align: left; }
+.chat-panel { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+header { padding: 1rem 1.5rem; border-bottom: 1px solid #2b344a; background: #11182a; }
+header h2 { margin: 0 0 .4rem; font-size: 1.2rem; }
+details { font-size: .8rem; color: #a7b5cf; }
+summary { cursor: pointer; }
+code { display: block; overflow-wrap: anywhere; color: #d0cfff; }
+.messages { flex: 1; min-height: 0; padding: 1.5rem; overflow-y: auto; display: flex; flex-direction: column; gap: .8rem; }
+.bubble { align-self: flex-start; max-width: 78%; padding: .7rem 1rem; background: #202d46; border-radius: 12px 12px 12px 2px; overflow-wrap: anywhere; }
+.bubble.own { align-self: flex-end; background: #413d79; border-radius: 12px 12px 2px 12px; }
+.bubble.invalid { border: 1px solid #ff929c; }
+.bubble p { white-space: pre-wrap; margin: 0 0 .4rem; }
+.bubble small { font-size: .68rem; color: #c1c9df; }
+.typing { padding: 0 1.5rem; font-size: .8rem; color: #a8a3f7; min-height: 1.4rem; }
+.composer { display: flex; align-items: center; gap: .8rem; padding: .5rem 1.5rem 1.5rem; }
+.composer textarea { resize: none; margin: 0; }
+.welcome { margin: auto; padding: 2rem; text-align: center; max-width: 600px; }
+.welcome p, .empty { color: #9baac3; }
+.file-label { font-size: .8rem; color: #bbc5da; }
+.file-label input { font-size: .8rem; }
+@media (max-width: 700px) {
+  .chat-shell { flex-direction: column; }
+  .sidebar { width: 100%; max-height: 35dvh; padding: .8rem; border-right: 0; }
+  .sidebar .brand { font-size: 1.1rem; }
+  .account { margin: .6rem 0; }
+  .sidebar .hint { display: none; }
+  .sidebar nav { display: flex; flex-wrap: wrap; }
+  .sidebar nav .conversation { width: auto; }
+  .chat-panel { min-height: 0; }
+  .messages { padding: .8rem; }
+  .composer { padding: .5rem; }
+  .bubble { max-width: 90%; }
+}
