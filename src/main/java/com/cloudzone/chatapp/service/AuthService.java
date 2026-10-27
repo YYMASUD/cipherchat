@@ -53,24 +53,62 @@ public class AuthService {
     @Transactional
     public Api.Tokens login(Api.Login request) {
         validatePassword(request.password());
-        ChatUser user = users.findByUsername(request.username().toLowerCase(Locale.ROOT)).orElse(null);
+        ChatUser user = users.lockByUsername(request.username().toLowerCase(Locale.ROOT)).orElse(null);
         boolean valid = passwords.matches(request.password(), user == null ? dummyHash : user.getPasswordHash());
         if (!valid || user == null) throw new ApiException(HttpStatus.UNAUTHORIZED, "Invalid username or password");
         return issue(user);
     }
     @Transactional
     public Api.Tokens rotate(String raw) {
+        // All issuance paths lock the account before refresh-token mutation. This
+        // prevents a concurrent refresh/login from surviving a password change.
+        RefreshToken candidate = refresh.findById(hash(raw)).orElseThrow(() -> new ApiException(HttpStatus.UNAUTHORIZED, "Invalid refresh token"));
+        ChatUser user = users.lockById(candidate.getUserId()).orElseThrow(() -> new ApiException(HttpStatus.UNAUTHORIZED, "Invalid refresh token"));
         RefreshToken old = refresh.lockByHash(hash(raw)).orElseThrow(() -> new ApiException(HttpStatus.UNAUTHORIZED, "Invalid refresh token"));
         if (!old.getExpiresAt().isAfter(Instant.now())) throw new ApiException(HttpStatus.UNAUTHORIZED, "Refresh token expired");
+        String sessionId = old.getSessionId();
+        Instant createdAt = old.getCreatedAt();
         refresh.delete(old);
-        return issue(users.findById(old.getUserId()).orElseThrow());
+        refresh.flush();
+        return issue(user, sessionId, createdAt);
+    }
+    @Transactional
+    public void changePassword(UUID userId, Api.ChangePassword request) {
+        validatePassword(request.currentPassword()); validatePassword(request.newPassword());
+        ChatUser user = users.lockById(userId).orElseThrow(() -> new ApiException(HttpStatus.UNAUTHORIZED, "Account not found"));
+        if (!passwords.matches(request.currentPassword(), user.getPasswordHash()))
+            throw new ApiException(HttpStatus.FORBIDDEN, "Current password is incorrect");
+        if (request.currentPassword().equals(request.newPassword()))
+            throw new ApiException(HttpStatus.BAD_REQUEST, "Choose a different password");
+        user.setPasswordHash(passwords.encode(request.newPassword()));
+        refresh.deleteByUserId(userId);
     }
     @Transactional
     public void logout(String raw) { refresh.lockByHash(hash(raw)).ifPresent(refresh::delete); }
+    @Transactional(readOnly = true)
+    public List<Api.SessionView> sessions(UUID user) {
+        return refresh.findByUserIdAndExpiresAtAfterOrderByLastUsedAtDesc(user, Instant.now()).stream()
+                .map(t -> new Api.SessionView(t.getSessionId(), t.getCreatedAt(), t.getLastUsedAt(), t.getExpiresAt())).toList();
+    }
+    @Transactional
+    public void revokeSession(UUID user, String sessionId) {
+        users.lockById(user).orElseThrow(() -> new ApiException(HttpStatus.UNAUTHORIZED, "Account not found"));
+        // The account lock also serializes refresh and login against revocation.
+        refresh.findByUserIdAndSessionId(user, sessionId).ifPresent(refresh::delete);
+    }
+    @Transactional
+    public void revokeAllSessions(UUID user) {
+        users.lockById(user).orElseThrow(() -> new ApiException(HttpStatus.UNAUTHORIZED, "Account not found"));
+        refresh.deleteByUserId(user);
+    }
     private Api.Tokens issue(ChatUser user) {
+        return issue(user, UUID.randomUUID().toString(), Instant.now());
+    }
+    private Api.Tokens issue(ChatUser user, String sessionId, Instant createdAt) {
         byte[] bytes = new byte[48]; new SecureRandom().nextBytes(bytes);
         String raw = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
         RefreshToken t = new RefreshToken(); t.setTokenHash(hash(raw)); t.setUserId(user.getId());
+        t.setSessionId(sessionId); t.setCreatedAt(createdAt); t.setLastUsedAt(Instant.now());
         t.setExpiresAt(Instant.now().plusMillis(refreshTtl)); refresh.save(t);
         return new Api.Tokens(tokens.issue(user.getId()), raw, view(user));
     }

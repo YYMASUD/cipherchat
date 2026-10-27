@@ -53,17 +53,43 @@ export async function unlockIdentity(backup, password, expectedPublicKey) {
   } catch { throw new Error('Unable to unlock your key. Check the password and encrypted backup.'); }
   finally { raw?.fill(0); }
 }
-export async function encryptMessage(text, senderPublicKey, recipientPublicKey, clientId = crypto.randomUUID()) {
+export async function reencryptIdentity(backup, currentPassword, newPassword, expectedPublicKey) {
+  // Validate the backup and key pair before handling exportable key bytes.
+  await unlockIdentity(backup, currentPassword, expectedPublicKey);
+  const oldKey = await passwordKey(currentPassword, unbase64(backup.salt), backup.iterations, ['decrypt']);
+  let raw;
+  try {
+    raw = new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unbase64(backup.iv),
+      additionalData: encoder.encode(expectedPublicKey) }, oldKey, unbase64(backup.encrypted)));
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const key = await passwordKey(newPassword, salt, ITERATIONS, ['encrypt']);
+    const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv,
+      additionalData: encoder.encode(expectedPublicKey) }, key, raw);
+    return { version: 1, publicKey: expectedPublicKey, salt: base64(salt), iv: base64(iv),
+      iterations: ITERATIONS, encrypted: base64(encrypted) };
+  } finally { raw?.fill(0); }
+}
+function authenticatedData(message) {
+  const version = message.envelopeVersion ?? 1;
+  if (version === 1) return encoder.encode(message.clientId);
+  if (version !== 2 || !message.conversationId || !message.senderId || !message.recipientId)
+    throw new Error('Unsupported or incomplete encrypted envelope.');
+  return encoder.encode(JSON.stringify(['cipherchat', 2, message.conversationId, message.senderId, message.recipientId, message.clientId]));
+}
+export async function encryptMessage(text, senderPublicKey, recipientPublicKey, clientId = crypto.randomUUID(), context = null) {
+  const envelope = context ? { envelopeVersion: 2, conversationId: context.conversationId,
+    senderId: context.senderId, recipientId: context.recipientId, clientId } : { clientId };
   const aes = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt']);
   const iv = crypto.getRandomValues(new Uint8Array(12));
-  const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: encoder.encode(clientId) }, aes, encoder.encode(text));
+  const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: authenticatedData(envelope) }, aes, encoder.encode(text));
   const raw = new Uint8Array(await crypto.subtle.exportKey('raw', aes));
   try {
     const wrap = async publicKey => {
       const key = await crypto.subtle.importKey('spki', unbase64(publicKey), RSA, false, ['encrypt']);
       return base64(await crypto.subtle.encrypt(RSA, key, raw));
     };
-    return { clientId, ciphertext: base64(ciphertext), iv: base64(iv),
+    return { ...envelope, ciphertext: base64(ciphertext), iv: base64(iv),
       senderKey: await wrap(senderPublicKey), recipientKey: await wrap(recipientPublicKey) };
   } finally { raw.fill(0); }
 }
@@ -73,7 +99,7 @@ export async function decryptMessage(message, privateKey, ownId) {
   try {
     const aes = await crypto.subtle.importKey('raw', raw, { name: 'AES-GCM' }, false, ['decrypt']);
     const plaintext = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unbase64(message.iv),
-      additionalData: encoder.encode(message.clientId) }, aes, unbase64(message.ciphertext));
+      additionalData: authenticatedData(message) }, aes, unbase64(message.ciphertext));
     return decoder.decode(plaintext);
   } finally { raw.fill(0); }
 }

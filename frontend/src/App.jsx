@@ -2,7 +2,16 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Client } from '@stomp/stompjs';
 import { http, setSession, currentSession, refreshSession, onExpired, signOut, errorText } from './api.js';
 import { generateIdentity, unlockIdentity, encryptMessage, decryptMessage, fingerprint } from './crypto.js';
-import { loadIdentity, saveIdentity, pinKey, savePending, removePending, pendingFor } from './storage.js';
+import { loadIdentity, saveIdentity, pinKey, savePending, removePending, pendingFor, persistDraft, loadDraft, verifiedKey, verifyKey, clearAccountData } from './storage.js';
+import { encodeContent, decodeContent } from './messageContent.js';
+import MessageList from './components/MessageList.jsx';
+import ConversationList from './components/ConversationList.jsx';
+import ThemeToggle from './components/ThemeToggle.jsx';
+import PrivacyControls from './components/PrivacyControls.jsx';
+import NotificationControls from './components/NotificationControls.jsx';
+import PasswordControls from './components/PasswordControls.jsx';
+import SessionControls from './components/SessionControls.jsx';
+import { notifyMessage } from './notifications.js';
 
 function Auth({ authenticated }) {
   const [register, setRegister] = useState(false);
@@ -79,7 +88,12 @@ function Chat({ identity, logout }) {
   const [typing, setTyping] = useState(false);
   const [busy, setBusy] = useState(false);
   const [hasMore, setHasMore] = useState(false);
-  const [page, setPage] = useState(0);
+  const [reply, setReply] = useState(null);
+  const [showArchived, setShowArchived] = useState(false);
+  const [verified, setVerified] = useState(false);
+  const [messageSearch, setMessageSearch] = useState('');
+  const [loadingConversation, setLoadingConversation] = useState(false);
+  const [clearing, setClearing] = useState(false);
   const [queued, setQueued] = useState(0);
   const [peerFingerprint, setPeerFingerprint] = useState('');
   const [ownFingerprint, setOwnFingerprint] = useState('');
@@ -89,9 +103,10 @@ function Chat({ identity, logout }) {
   const typingSent = useRef(0);
   const active = useRef(true);
   const syncing = useRef(false);
-  const bottom = useRef(null);
   const historyVersion = useRef(0);
-  const pageRef = useRef(0);
+  const cursorRef = useRef(null);
+  const draftRef = useRef({ text: '', reply: null });
+  const seenNotifications = useRef(new Set());
 
   function merge(items) {
     if (!active.current) return;
@@ -105,7 +120,7 @@ function Chat({ identity, logout }) {
     });
   }
   async function readable(m) {
-    try { return { ...m, text: await decryptMessage(m, privateKey, user.id) }; }
+    try { return { ...m, ...decodeContent(await decryptMessage(m, privateKey, user.id)) }; }
     catch { return { ...m, text: 'Unable to decrypt or authenticate this message.', invalid: true }; }
   }
   async function acknowledge(m, read) {
@@ -119,30 +134,51 @@ function Chat({ identity, logout }) {
       all.push(...data);
       if (data.length < 50) break;
     }
-    if (active.current) setConversations(all);
+    if (active.current) {
+      setConversations(all);
+      const updated = all.find(c => c.id === selectedRef.current?.id);
+      if (updated) { selectedRef.current = updated; setSelected(updated); }
+    }
     return all;
   }
-  async function loadHistory(conversation, historyPage = 0) {
+  async function loadHistory(conversation, older = false) {
     const version = historyVersion.current;
-    const { data } = await http.get(`/conversations/${conversation.id}/messages?page=${historyPage}`);
+    const { data } = await http.get(`/conversations/${conversation.id}/messages`, { params: older ? { before: cursorRef.current } : {} });
     const decoded = await Promise.all(data.messages.map(readable));
     if (!active.current || selectedRef.current?.id !== conversation.id || version !== historyVersion.current) return;
     merge(decoded);
-    if (historyPage >= pageRef.current) {
-      pageRef.current = historyPage; setHasMore(data.hasMore); setPage(historyPage);
+    if (older || !cursorRef.current) {
+      cursorRef.current = data.nextCursor; setHasMore(data.hasMore);
     }
     await Promise.all(data.messages.map(m => acknowledge(m, document.visibilityState === 'visible')));
+    if (data.messages.length && document.visibilityState === 'visible') {
+      await http.post(`/conversations/${conversation.id}/read`, { messageId: data.messages[0].id });
+    }
   }
   async function select(conversation) {
+    setLoadingConversation(true);
     try {
       await pinKey(user.id, conversation.peer);
       const print = await fingerprint(conversation.peer.publicKey);
       historyVersion.current++;
-      pageRef.current = 0;
+      cursorRef.current = null;
       selectedRef.current = conversation;
-      setSelected(conversation); setPeerFingerprint(print); setMessages([]); setDraft(''); setTyping(false); setError(''); setHasMore(false);
+      draftRef.current = { text: '', reply: null };
+      setSelected(conversation); setPeerFingerprint(print); setMessages([]); setDraft(''); setReply(null); setTyping(false); setError(''); setHasMore(false); setVerified(false); setMessageSearch('');
+      const verification = await verifiedKey(user.id, conversation.peer.id);
+      if (selectedRef.current?.id !== conversation.id) return;
+      setVerified(verification === conversation.peer.publicKey);
+      const saved = await loadDraft(user.id, conversation.id);
+      if (selectedRef.current?.id !== conversation.id) return;
+      if (saved) {
+        const content = decodeContent(await decryptMessage(saved, privateKey, user.id));
+        if (selectedRef.current?.id !== conversation.id) return;
+        draftRef.current = content; setDraft(content.text); setReply(content.reply);
+      }
       await loadHistory(conversation);
-    } catch (e) { setError(errorText(e)); }
+      await loadConversations();
+    } catch (e) { if (active.current) setError(errorText(e)); }
+    finally { if (active.current) setLoadingConversation(false); }
   }
   async function syncOutbox() {
     if (syncing.current) return;
@@ -189,7 +225,15 @@ function Chat({ identity, logout }) {
               }
               if (event.type === 'message') {
                 await acknowledge(m, selectedRef.current?.id === m.conversationId && document.visibilityState === 'visible');
-                await loadConversations();
+                if (selectedRef.current?.id === m.conversationId && document.visibilityState === 'visible')
+                  await http.post(`/conversations/${m.conversationId}/read`, { messageId: m.id });
+                const all = await loadConversations();
+                if (!seenNotifications.current.has(m.id)) {
+                  seenNotifications.current.add(m.id);
+                  if (seenNotifications.current.size > 1000) seenNotifications.current.delete(seenNotifications.current.values().next().value);
+                  const conversation = all.find(c => c.id === m.conversationId);
+                  if (conversation) notifyMessage(m, conversation, user.id);
+                }
               }
             } else if (event.type === 'conversation') await loadConversations();
             else if (event.type === 'typing' && event.data.conversationId === selectedRef.current?.id) {
@@ -232,7 +276,6 @@ function Chat({ identity, logout }) {
     }, 300);
     return () => { cancelled = true; clearTimeout(timer); };
   }, [query]);
-  useEffect(() => { bottom.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages.length]);
   async function start(peer) {
     try {
       await pinKey(user.id, peer);
@@ -242,14 +285,23 @@ function Chat({ identity, logout }) {
   }
   async function send(event) {
     event.preventDefault();
-    if (!draft.trim() || !selected || busy) return;
+    if (!draft.trim() || !selected || busy || loadingConversation || clearing || selected.blocked) return;
+    if (selected.requestState === 'rejected' || (selected.requestState === 'pending' &&
+        (selected.incomingRequest || messages.some(m => m.senderId === user.id)))) {
+      setError('This message request must be accepted before you can send more messages.'); return;
+    }
     setBusy(true); setError('');
     try {
       const conversation = selected;
       await pinKey(user.id, conversation.peer);
-      const payload = await encryptMessage(draft, user.publicKey, conversation.peer.publicKey);
+      const content = draftRef.current;
+      const payload = await encryptMessage(encodeContent(content.text, content.reply), user.publicKey, conversation.peer.publicKey,
+        crypto.randomUUID(), { conversationId: conversation.id, senderId: user.id, recipientId: conversation.peer.id });
       await savePending({ userId: user.id, conversationId: conversation.id, payload });
-      setDraft('');
+      if (selectedRef.current?.id === conversation.id && draftRef.current === content) {
+        draftRef.current = { text: '', reply: null }; setDraft(''); setReply(null);
+        await persistDraft(user.id, conversation.id, async () => null);
+      }
       if (clientRef.current?.connected) clientRef.current.publish({ destination: '/app/typing', body: JSON.stringify({ conversationId: conversation.id, typing: false }) });
       await syncOutbox();
     } catch (e) { setError(errorText(e)); }
@@ -257,10 +309,58 @@ function Chat({ identity, logout }) {
   }
   function changeDraft(value) {
     setDraft(value);
+    storeDraft(value, draftRef.current.reply);
     if (clientRef.current?.connected && selected && Date.now() - typingSent.current > 2000) {
       typingSent.current = Date.now();
       clientRef.current.publish({ destination: '/app/typing', body: JSON.stringify({ conversationId: selected.id, typing: !!value }) });
     }
+  }
+  function storeDraft(text, replyTo) {
+    draftRef.current = { text, reply: replyTo };
+    const conversation = selectedRef.current;
+    if (!conversation) return;
+    void persistDraft(user.id, conversation.id, async () => text || replyTo
+      ? { ...await encryptMessage(encodeContent(text, replyTo), user.publicKey, user.publicKey), senderId: user.id }
+      : null).catch(e => active.current && setError(`Draft not saved: ${errorText(e)}`));
+  }
+  function chooseReply(message) {
+    setReply(message); storeDraft(draftRef.current.text, message);
+  }
+  async function updateSettings(key) {
+    const c = selectedRef.current;
+    if (!c) return;
+    try {
+      await http.post(`/conversations/${c.id}/settings`, { pinned: c.pinned, archived: c.archived, muted: c.muted, [key]: !c[key] });
+      await loadConversations();
+    } catch (e) { setError(errorText(e)); }
+  }
+  async function toggleBlock() {
+    const c = selectedRef.current;
+    try {
+      await http.post(`/privacy/blocks/${c.peer.id}`, { blocked: !c.blocked });
+      await loadConversations();
+    } catch (e) { setError(errorText(e)); }
+  }
+  async function decideRequest(accept) {
+    const conversation = selectedRef.current;
+    try {
+      await http.post(`/conversations/${conversation.id}/request`, { accept });
+      await loadConversations();
+    } catch (e) { setError(errorText(e)); }
+  }
+  async function confirmFingerprint() {
+    const c = selectedRef.current;
+    if (!window.confirm('Have you compared this fingerprint with your contact over an independent trusted channel?')) return;
+    try {
+      await verifyKey(user.id, c.peer);
+      if (selectedRef.current?.id === c.id) setVerified(true);
+    } catch (e) { setError(errorText(e)); }
+  }
+  async function clearLocal() {
+    if (!window.confirm('Delete this account’s encrypted private key, drafts, queued messages and contact verification data from THIS browser? Without an exported key backup, encrypted history will be permanently inaccessible. Other tabs must be signed out first.')) return;
+    setClearing(true);
+    try { await clearAccountData(user); logout(); }
+    catch (e) { setError(errorText(e)); setClearing(false); }
   }
   function downloadBackup() {
     const url = URL.createObjectURL(new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' }));
@@ -276,28 +376,45 @@ function Chat({ identity, logout }) {
       <label>New conversation<input placeholder="Search username…" value={query} onChange={e => setQuery(e.target.value)} maxLength={32} /></label>
       {results.map(peer => <button className="conversation" key={peer.id} onClick={() => start(peer)}>+ @{peer.username}</button>)}
       {query && results.length === 0 && <p className="hint">No matching users.</p>}
-      <nav aria-label="Conversations">{conversations.map(c => <button key={c.id} className={`conversation ${selected?.id === c.id ? 'selected' : ''}`} onClick={() => select(c)}>
-        <span>@{c.peer.username}</span><small className={c.online ? 'online' : 'offline'}>{c.online ? 'Online' : 'Offline'}</small>
-      </button>)}</nav>
+      <ThemeToggle />
+      <PrivacyControls onError={setError} />
+      <PasswordControls user={user} backup={backup} logout={logout} />
+      <NotificationControls onError={setError} />
+      <SessionControls logout={logout} />
+      <button className="link" onClick={() => setShowArchived(!showArchived)}>{showArchived ? 'Show inbox' : 'Show archive'}</button>
+      <ConversationList conversations={conversations} selected={selected} select={select} archived={showArchived} />
       <button className="link logout" onClick={logout}>Sign out & lock keys</button>
+      <button className="link" disabled={clearing} onClick={clearLocal}>Delete this account’s local data</button>
     </aside>
     <section className="chat-panel">
       {error && <div className="error banner" role="alert">{error}<button className="link" onClick={() => setError('')}>Dismiss</button></div>}
       {queued > 0 && <div className="notice banner">{queued} encrypted message(s) queued. <button className="link" onClick={syncOutbox}>Retry sending</button></div>}
       {selected ? <>
-        <header><h2>@{selected.peer.username}</h2><details><summary>End-to-end encrypted · verify keys</summary><p>Contact's key — compare over a trusted channel:</p><code>{peerFingerprint}</code><p>Your key — share this fingerprint with your contact:</p><code>{ownFingerprint}</code><p>Trust-on-first-use blocks changes on this browser. No forward secrecy.</p></details></header>
-        <div className="messages" aria-live="polite">
-          {hasMore && <button className="secondary" onClick={() => loadHistory(selected, page + 1).catch(e => setError(errorText(e)))}>Load older messages</button>}
-          {messages.length === 0 && <p className="empty">No messages yet. Say hello privately.</p>}
-          {messages.map(m => <article key={m.id} className={`bubble ${m.senderId === user.id ? 'own' : ''} ${m.invalid ? 'invalid' : ''}`}>
-            <p>{m.text}</p><small>{new Date(m.createdAt).toLocaleString()}{m.senderId === user.id && ` · ${m.readAt ? 'Read' : m.deliveredAt ? 'Delivered' : 'Sent'}`}</small>
-          </article>)}<div ref={bottom} />
+        <header><h2>@{selected.peer.username}</h2><details><summary>End-to-end encrypted · {verified ? 'Fingerprint verified on this browser' : 'Verify keys'}</summary><p>Contact's key — compare over a trusted channel:</p><code>{peerFingerprint}</code><button className="link" disabled={verified} onClick={confirmFingerprint}>{verified ? 'Verified' : 'Mark fingerprint verified'}</button><p>Your key — share this fingerprint with your contact:</p><code>{ownFingerprint}</code><p>Trust-on-first-use blocks changes on this browser. No forward secrecy.</p></details></header>
+        <div className="conversation-tools">
+          {['pinned', 'archived', 'muted'].map(key => <button key={key} className="secondary" aria-pressed={!!selected[key]} onClick={() => updateSettings(key)}>
+            {{ pinned: selected.pinned ? 'Unpin' : 'Pin', archived: selected.archived ? 'Unarchive' : 'Archive', muted: selected.muted ? 'Unmute' : 'Mute' }[key]}
+          </button>)}
+          <span className="hint">Mute silences this conversation's browser notifications.</span>
+          <button className="secondary" onClick={toggleBlock}>{selected.blocked ? 'Unblock contact' : 'Block contact'}</button>
         </div>
+        {selected.blocked && <p className="notice banner">This contact is blocked. Existing history remains available.</p>}
+        {selected.requestState === 'pending' && <div className="notice banner" role="status">
+          {selected.incomingRequest ? <><span>New message request. Accept to chat, or decline to stop further messages.</span>
+            <button onClick={() => decideRequest(true)}>Accept</button><button className="secondary" onClick={() => decideRequest(false)}>Decline</button></>
+            : <span>Awaiting acceptance. You may send one encrypted introduction. Typing and receipts stay private until accepted.</span>}
+        </div>}
+        {selected.requestState === 'rejected' && <div className="notice banner">Message request declined. Messaging is disabled.
+          {selected.incomingRequest && <button onClick={() => decideRequest(true)}>Accept request instead</button>}</div>}
+        <label className="message-search">Search loaded messages (on this device only)<input type="search" value={messageSearch} onChange={e => setMessageSearch(e.target.value)} /></label>
+        <MessageList key={selected.id} messages={messages.filter(m => !messageSearch || m.text.toLowerCase().includes(messageSearch.toLowerCase()))} ownId={user.id} hasMore={hasMore && !messageSearch} reply={chooseReply}
+          loadOlder={() => loadHistory(selected, true).catch(e => setError(errorText(e)))} />
         <div className="typing">{typing ? `${selected.peer.username} is typing…` : '\u00a0'}</div>
+        {reply && <div className="reply-composer"><span>Replying: {reply.text.slice(0, 240)}</span><button className="link" onClick={() => chooseReply(null)}>Cancel reply</button></div>}
         <form className="composer" onSubmit={send}>
-          <textarea aria-label="Message" placeholder="Write an encrypted message…" value={draft} onChange={e => changeDraft(e.target.value)} maxLength={8000} rows={2}
+          <textarea aria-label="Message" placeholder="Write an encrypted message…" value={draft} onChange={e => changeDraft(e.target.value)} maxLength={8000} rows={2} disabled={busy || loadingConversation || clearing || selected.blocked || selected.requestState === 'rejected' || (selected.requestState === 'pending' && (selected.incomingRequest || messages.some(m => m.senderId === user.id)))}
             onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send(e); } }} />
-          <button disabled={busy || !draft.trim()}>{busy ? 'Encrypting…' : 'Send'}</button>
+          <button disabled={busy || loadingConversation || clearing || selected.blocked || !draft.trim() || selected.requestState === 'rejected' || (selected.requestState === 'pending' && (selected.incomingRequest || messages.some(m => m.senderId === user.id)))}>{busy ? 'Encrypting…' : 'Send'}</button>
         </form>
       </> : <div className="welcome"><h1>Your conversations, private.</h1><p>Search for a user or select a conversation to begin.</p><p>Messages are encrypted in your browser. The server stores ciphertext only.</p></div>}
     </section>

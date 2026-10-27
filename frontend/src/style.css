@@ -48,6 +48,28 @@ code { display: block; overflow-wrap: anywhere; color: #d0cfff; }
 .welcome p, .empty { color: #9baac3; }
 .file-label { font-size: .8rem; color: #bbc5da; }
 .file-label input { font-size: .8rem; }
+.badge { display: inline-block; margin-left: .5rem; background: #7775ed; color: white; padding: .1rem .4rem; border-radius: 12px; }
+.conversation-tools, .reply-composer { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; padding: .7rem 1.5rem; }
+.reply-preview { display: block; text-align: left; width: 100%; background: #0003; border-left: 3px solid #aaa6ff; font-size: .8rem; white-space: pre-wrap; }
+.message-actions .link { padding: .3rem 0 0; font-size: .75rem; }
+.message-actions { display: flex; gap: 1rem; }
+.privacy-controls { margin: .8rem 0; }
+.privacy-controls input { width: auto; }
+.privacy-controls label { font-size: .8rem; margin: .5rem 0; }
+.message-search { margin: .5rem 1.5rem; font-size: .8rem; }
+article:focus { outline: 2px solid #aaa6ff; outline-offset: 3px; }
+:root[data-theme="light"] { color-scheme: light; color: #17213a; background: #f4f6fb; }
+[data-theme="light"] .sidebar, [data-theme="light"] .auth-card, [data-theme="light"] header { background: #e9edf7; }
+[data-theme="light"] .chat-panel { background: #f4f6fb; }
+[data-theme="light"] input, [data-theme="light"] textarea { color: #17213a; background: white; }
+[data-theme="light"] .conversation { color: #17213a; }
+[data-theme="light"] .conversation.selected { background: #d6d5f0; }
+[data-theme="light"] .bubble { background: #dce5f5; }
+[data-theme="light"] .bubble.own { background: #d9d5fa; }
+[data-theme="light"] .bubble small, [data-theme="light"] small, [data-theme="light"] .hint,
+[data-theme="light"] details, [data-theme="light"] .empty, [data-theme="light"] .welcome p { color: #465572; }
+[data-theme="light"] .link, [data-theme="light"] .brand, [data-theme="light"] code { color: #4842a4; }
+[data-theme="light"] .auth-shell { background: #f4f6fb; }
 @media (max-width: 700px) {
   .chat-shell { flex-direction: column; }
   .sidebar { width: 100%; max-height: 35dvh; padding: .8rem; border-right: 0; }

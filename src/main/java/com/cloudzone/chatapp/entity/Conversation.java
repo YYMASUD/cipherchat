@@ -15,4 +15,6 @@ public class Conversation {
     @Column(name = "first_user", nullable = false) private UUID firstUser;
     @Column(name = "second_user", nullable = false) private UUID secondUser;
     @Column(nullable = false) private Instant createdAt = Instant.now();
+    private UUID requestRecipient;
+    @Column(nullable = false, length = 16) private String requestState = "accepted";
 }

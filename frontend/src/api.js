@@ -4,6 +4,7 @@ export const http = axios.create({ baseURL: '/api', timeout: 15000 });
 let session = null;
 let refreshing = null;
 let expired = () => {};
+const publicAuthPaths = new Set(['/auth/register', '/auth/login', '/auth/refresh', '/auth/logout']);
 export function setSession(value) { session = value; }
 export function onExpired(callback) { expired = callback; }
 export function currentSession() { return session; }
@@ -27,12 +28,12 @@ export async function refreshSession() {
   return refreshing;
 }
 http.interceptors.request.use(config => {
-  if (session && !config.url.startsWith('/auth/')) config.headers.Authorization = `Bearer ${session.accessToken}`;
+  if (session && !publicAuthPaths.has(config.url)) config.headers.Authorization = `Bearer ${session.accessToken}`;
   return config;
 });
 http.interceptors.response.use(response => response, async error => {
   const config = error.config;
-  if (error.response?.status === 401 && session && config && !config._retried && !config.url.startsWith('/auth/')) {
+  if (error.response?.status === 401 && session && config && !config._retried && !publicAuthPaths.has(config.url)) {
     config._retried = true;
     await refreshSession();
     return http(config);

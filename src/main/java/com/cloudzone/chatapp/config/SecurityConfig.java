@@ -32,10 +32,12 @@ public class SecurityConfig {
                 }))
                 .addFilterBefore(jwt, UsernamePasswordAuthenticationFilter.class).build();
     }
+    // Fix Bug 5: added "DELETE" to allowed CORS methods so session revocation endpoints
+    // (DELETE /api/auth/sessions and DELETE /api/auth/sessions/{id}) work from the browser.
     @Bean CorsConfigurationSource cors(@Value("${app.cors.allowed-origins}") String origins) {
         CorsConfiguration c = new CorsConfiguration();
         c.setAllowedOrigins(Arrays.stream(origins.split(",")).map(String::trim).toList());
-        c.setAllowedMethods(List.of("GET", "POST", "OPTIONS"));
+        c.setAllowedMethods(List.of("GET", "POST", "DELETE", "OPTIONS"));
         c.setAllowedHeaders(List.of("Authorization", "Content-Type"));
         c.setMaxAge(3600L);
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();

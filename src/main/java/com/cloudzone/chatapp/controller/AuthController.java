@@ -6,6 +6,9 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
+import java.security.Principal;
+import java.util.UUID;
+import java.util.List;
 
 @RestController @RequestMapping("/api/auth")
 public class AuthController {
@@ -26,4 +29,18 @@ public class AuthController {
     }
     @PostMapping("/logout") @ResponseStatus(HttpStatus.NO_CONTENT)
     public void logout(@Valid @RequestBody Api.Refresh request) { auth.logout(request.refreshToken()); }
+    @GetMapping("/sessions")
+    public List<Api.SessionView> sessions(Principal p) { return auth.sessions(UUID.fromString(p.getName())); }
+    @DeleteMapping("/sessions/{sessionId}") @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void revokeSession(Principal p, @PathVariable String sessionId) {
+        auth.revokeSession(UUID.fromString(p.getName()), sessionId);
+    }
+    @DeleteMapping("/sessions") @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void revokeAllSessions(Principal p) { auth.revokeAllSessions(UUID.fromString(p.getName())); }
+    @PostMapping("/password") @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void password(Principal p, @Valid @RequestBody Api.ChangePassword request) {
+        UUID user = UUID.fromString(p.getName());
+        limits.check("password:" + user, 5);
+        auth.changePassword(user, request);
+    }
 }

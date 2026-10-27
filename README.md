@@ -26,6 +26,19 @@ The backend accepts and persists encrypted message envelopes, never message text
   missed. The UI polls every 15 seconds as a fallback.
 - Responsive UI, validation, per-instance authentication/message rate limits,
   Flyway migrations, API integration tests, socket tests, and cryptographic tests.
+- Stable message-ID cursors, automatic older-history loading with scroll anchoring,
+  recent-activity sorting, unread badges, and independent monotonic read positions.
+- Per-user pin/archive/mute preferences, encrypted reply previews, copy-text actions,
+  browser-encrypted drafts, and search across loaded decrypted messages (in memory).
+- Server-enforced two-way messaging blocks and privacy settings for presence,
+  typing, and read receipts. Blocking keeps existing history available.
+- Locally verified fingerprints, account-specific local-data removal, light/dark
+  themes, and opt-in generic browser notifications while the app is open.
+- GitHub Actions frontend checks and backend verification jobs for H2/PostgreSQL.
+
+The broader roadmap is **not complete**. See
+[`docs/IMPLEMENTATION_STATUS.md`](docs/IMPLEMENTATION_STATUS.md) for remaining work
+and validation limitations.
 
 ## Requirements and startup
 
@@ -121,9 +134,14 @@ Requests are JSON. Null response fields are omitted. Errors use `{ "message": ".
 | `GET /api/users/me` | Current public profile |
 | `GET /api/users?q=prefix` | Up to 20 users, excluding self |
 | `GET /api/users/{id}/public-key` | `{ id, username, publicKey }` (Base64 SPKI) |
-| `GET /api/conversations?page=0` | Up to 50 `{ id, peer, createdAt, online }` |
+| `GET /api/conversations?page=0` | Up to 50 conversations including activity, unread count, pin/archive/mute and own block state |
 | `POST /api/conversations` | `{ userId }`; existing or new direct conversation |
-| `GET /api/conversations/{id}/messages?page=0` | `{ messages, hasMore }`, 50 newest first |
+| `GET /api/conversations/{id}/messages?before={messageId}` | `{ messages, hasMore, nextCursor }`, 50 newest first; omit cursor for latest |
+| `POST /api/conversations/{id}/settings` | `{ pinned, archived, muted }`; affects only the authenticated user |
+| `POST /api/conversations/{id}/read` | `{ messageId }`; advance own unread position, without publishing read receipts |
+| `GET /api/privacy` | Own presence/typing/read-receipt settings |
+| `POST /api/privacy` | `{ showPresence, sendTyping, sendReadReceipts }` |
+| `POST /api/privacy/blocks/{userId}` | `{ blocked }`; prevents new messaging/typing in either direction, status 204 |
 | `POST /api/conversations/{id}/messages` | `{ clientId, ciphertext, iv, recipientKey, senderKey }` |
 | `POST /api/conversations/receipts` | `{ messageId, read }`; recipient only |
 
@@ -131,8 +149,19 @@ Messages include `id`, `conversationId`, `senderId`, `clientId`, encrypted envel
 fields, `createdAt`, and optional `deliveredAt` / `readAt`. Binary fields use standard
 Base64; IVs are 12 bytes. Reusing a sender's client ID returns the original message.
 A concurrent creation may return 409: retry the same request after the winner commits.
-History uses offset pagination; concurrent inserts can shift page boundaries, so
-clients deduplicate by message ID. Older history is loaded manually in the UI.
+History cursors resolve to a conversation-authorized message and select older rows
+by `(createdAt, id)`. New inserts do not shift older cursor boundaries. Legacy
+`page` history requests remain supported, but new clients should use cursors.
+Conversation-list pagination still uses offsets; periodic reconciliation repairs
+activity-related list movements. The UI deduplicates messages by ID.
+
+Replies and draft contents use a tagged version-1 content payload inside the
+existing encrypted envelope. Older plain-text messages remain readable. This is
+not a new cryptographic envelope or forward-secret protocol. Drafts are encrypted
+to the account's own public key and stored in IndexedDB; never stored as plaintext.
+The reply preview is a sender-supplied quote, not proof of the original content.
+Notification payloads contain no message text, username, or keys. Notifications
+require an open app and browser support; Web Push is not implemented.
 
 ## WebSocket contract
 
@@ -163,7 +192,8 @@ npm audit
 
 Backend tests cover migrations, authentication, token rotation/revocation,
 expiry/signatures/issuer, search, membership isolation, idempotency, receipts,
-payload validation, live socket delivery, and forbidden subscriptions. Frontend
+payload validation, stable cursors, independent unread state, private preferences,
+blocking/privacy enforcement, live socket delivery, and forbidden subscriptions. Frontend
 Node tests execute real Web Crypto encryption, backup restoration, wrong-password
 rejection, sender/recipient decryption, and tamper rejection. Browser interaction
 and multi-node Redis/PostgreSQL behavior still require deployment-level testing.

@@ -22,4 +22,6 @@ public class ChatMessage {
     @Column(nullable = false) private Instant createdAt = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS);
     private Instant deliveredAt;
     private Instant readAt;
+    @Column(nullable = false) private int envelopeVersion = 1;
+    private UUID recipientId;
 }

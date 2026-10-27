@@ -22,8 +22,21 @@ public class ChatController {
         return chat.start(id(p), request.userId());
     }
     @GetMapping("/{conversation}/messages")
-    public Api.History history(Principal p, @PathVariable UUID conversation, @RequestParam(defaultValue = "0") @Min(0) @Max(10000) int page) {
-        return chat.history(id(p), conversation, page);
+    public Api.History history(Principal p, @PathVariable UUID conversation, @RequestParam(defaultValue = "0") @Min(0) @Max(10000) int page,
+                               @RequestParam(required = false) UUID before) {
+        return chat.history(id(p), conversation, page, before);
+    }
+    @PostMapping("/{conversation}/settings")
+    public Api.ConversationView settings(Principal p, @PathVariable UUID conversation, @Valid @RequestBody Api.ConversationSettings request) {
+        return chat.settings(id(p), conversation, request);
+    }
+    @PostMapping("/{conversation}/read")
+    public Api.ConversationView read(Principal p, @PathVariable UUID conversation, @Valid @RequestBody Api.ReadPosition request) {
+        return chat.read(id(p), conversation, request.messageId());
+    }
+    @PostMapping("/{conversation}/request")
+    public Api.ConversationView decideRequest(Principal p, @PathVariable UUID conversation, @Valid @RequestBody Api.RequestDecision request) {
+        return chat.decideRequest(id(p), conversation, request.accept());
     }
     @PostMapping("/{conversation}/messages")
     public Api.Message send(Principal p, @PathVariable UUID conversation, @Valid @RequestBody Api.SendMessage request) {
