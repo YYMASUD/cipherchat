@@ -32,9 +32,12 @@ public final class Api {
                               @NotBlank @Size(max = 1024) String recipientKey,
                               @NotBlank @Size(max = 1024) String senderKey,
                               @Min(1) @Max(2) Integer envelopeVersion, UUID conversationId, UUID senderId, UUID recipientId) {}
+    public record Reaction(String emoji, UUID userId, String username) {}
+    public record ToggleReaction(@NotNull UUID messageId, @NotBlank @Size(max = 8) String emoji) {}
     public record Message(UUID id, UUID conversationId, UUID senderId, UUID clientId,
                           String ciphertext, String iv, String recipientKey, String senderKey,
-                          Instant createdAt, Instant deliveredAt, Instant readAt, int envelopeVersion, UUID recipientId) {}
+                          Instant createdAt, Instant deliveredAt, Instant readAt, int envelopeVersion, UUID recipientId,
+                          Instant deletedAt, List<Reaction> reactions) {}
     public record History(List<Message> messages, boolean hasMore, UUID nextCursor) {}
     public record Receipt(@NotNull UUID messageId, boolean read) {}
     public record Typing(@NotNull UUID conversationId, boolean typing) {}

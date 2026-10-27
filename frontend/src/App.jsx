@@ -235,6 +235,10 @@ function Chat({ identity, logout }) {
                   if (conversation) notifyMessage(m, conversation, user.id);
                 }
               }
+            } else if (event.type === 'reaction') {
+              merge([event.data]);
+            } else if (event.type === 'message_deleted') {
+              merge([event.data]);
             } else if (event.type === 'conversation') await loadConversations();
             else if (event.type === 'typing' && event.data.conversationId === selectedRef.current?.id) {
               setTyping(event.data.typing); clearTimeout(typingTimer.current);
@@ -341,6 +345,19 @@ function Chat({ identity, logout }) {
       await loadConversations();
     } catch (e) { setError(errorText(e)); }
   }
+  async function onDelete(message) {
+    if (!window.confirm('Delete this message for everyone? This cannot be undone.')) return;
+    const conversation = selectedRef.current;
+    try {
+      await http.delete(/conversations//messages/);
+    } catch (e) { setError(errorText(e)); }
+  }
+  async function onReact(messageId, emoji) {
+    try {
+      const { data } = await http.post('/reactions', { messageId, emoji });
+      merge([data]);
+    } catch (e) { setError(errorText(e)); }
+  }
   async function decideRequest(accept) {
     const conversation = selectedRef.current;
     try {
@@ -407,7 +424,7 @@ function Chat({ identity, logout }) {
         {selected.requestState === 'rejected' && <div className="notice banner">Message request declined. Messaging is disabled.
           {selected.incomingRequest && <button onClick={() => decideRequest(true)}>Accept request instead</button>}</div>}
         <label className="message-search">Search loaded messages (on this device only)<input type="search" value={messageSearch} onChange={e => setMessageSearch(e.target.value)} /></label>
-        <MessageList key={selected.id} messages={messages.filter(m => !messageSearch || m.text.toLowerCase().includes(messageSearch.toLowerCase()))} ownId={user.id} hasMore={hasMore && !messageSearch} reply={chooseReply}
+        <MessageList key={selected.id} messages={messages.filter(m => !messageSearch || (m.text || '').toLowerCase().includes(messageSearch.toLowerCase()))} ownId={user.id} hasMore={hasMore && !messageSearch} reply={chooseReply} onDelete={onDelete} onReact={onReact} unreadCount={selected.unreadCount}
           loadOlder={() => loadHistory(selected, true).catch(e => setError(errorText(e)))} />
         <div className="typing">{typing ? `${selected.peer.username} is typing…` : '\u00a0'}</div>
         {reply && <div className="reply-composer"><span>Replying: {reply.text.slice(0, 240)}</span><button className="link" onClick={() => chooseReply(null)}>Cancel reply</button></div>}

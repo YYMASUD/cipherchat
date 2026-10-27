@@ -64,7 +64,7 @@ public class ChatService {
         UUID other = peer(c, user);
         ConversationPreference pref = preferences.findById(c.getId() + ":" + user).orElse(null);
         long unread = pref == null || pref.getLastReadAt() == null
-                ? messages.countByConversationIdAndSenderIdNot(c.getId(), user)
+                ? messages.countByConversationIdAndSenderIdNotAndDeletedAtIsNull(c.getId(), user)
                 : messages.unreadAfter(c.getId(), user, pref.getLastReadAt(), pref.getLastReadId());
         Instant activity = messages.findFirstByConversationIdOrderByCreatedAtDescIdDesc(c.getId())
                 .map(ChatMessage::getCreatedAt).orElse(c.getCreatedAt());
@@ -138,8 +138,7 @@ public class ChatService {
     }
     public Api.Message send(UUID user, UUID conversation, Api.SendMessage request) {
         Conversation c = member(conversation, user);
-        // Serialize introductions and request decisions across instances. Otherwise two
-        // concurrent submissions could both pass the single-introduction count check.
+        // Serialize introductions and request decisions across instances.
         // Fix Bug 4: removed duplicate lockById call.
         c = conversations.lockById(conversation).orElseThrow();
         limits.check("send:" + user, 120);
@@ -170,6 +169,21 @@ public class ChatService {
         Api.Message result = view(m);
         events.afterCommit(peer(c, user), "message", result); events.afterCommit(user, "message", result);
         return result;
+    }
+    public void deleteMessage(UUID user, UUID conversation, UUID messageId) {
+        member(conversation, user);
+        ChatMessage m = messages.findById(messageId)
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Message not found"));
+        if (!m.getConversationId().equals(conversation))
+            throw new ApiException(HttpStatus.BAD_REQUEST, "Message does not belong to this conversation");
+        if (!m.getSenderId().equals(user))
+            throw new ApiException(HttpStatus.FORBIDDEN, "Only the sender can delete a message");
+        if (m.getDeletedAt() != null) return; // already deleted, idempotent
+        m.setDeletedAt(Instant.now());
+        Api.Message result = view(m);
+        UUID peerUser = peer(member(conversation, user), user);
+        events.afterCommit(peerUser, "message_deleted", result);
+        events.afterCommit(user, "message_deleted", result);
     }
     public Api.Message receipt(UUID user, Api.Receipt request) {
         limits.check("receipt:" + user, 1000);
@@ -204,6 +218,7 @@ public class ChatService {
     }
     public static Api.Message view(ChatMessage m) {
         return new Api.Message(m.getId(), m.getConversationId(), m.getSenderId(), m.getClientId(), m.getCiphertext(),
-                m.getIv(), m.getRecipientKey(), m.getSenderKey(), m.getCreatedAt(), m.getDeliveredAt(), m.getReadAt(), m.getEnvelopeVersion(), m.getRecipientId());
+                m.getIv(), m.getRecipientKey(), m.getSenderKey(), m.getCreatedAt(), m.getDeliveredAt(), m.getReadAt(),
+                m.getEnvelopeVersion(), m.getRecipientId(), m.getDeletedAt(), null);
     }
 }

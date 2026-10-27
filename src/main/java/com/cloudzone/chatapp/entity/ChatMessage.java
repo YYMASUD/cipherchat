@@ -24,4 +24,5 @@ public class ChatMessage {
     private Instant readAt;
     @Column(nullable = false) private int envelopeVersion = 1;
     private UUID recipientId;
+    private Instant deletedAt;
 }

@@ -4,6 +4,7 @@ import com.cloudzone.chatapp.dto.Api;
 import com.cloudzone.chatapp.service.ChatService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.*;
+import org.springframework.http.HttpStatus;
 import org.springframework.messaging.handler.annotation.*;
 import org.springframework.messaging.simp.annotation.SendToUser;
 import org.springframework.web.bind.annotation.*;
@@ -41,6 +42,10 @@ public class ChatController {
     @PostMapping("/{conversation}/messages")
     public Api.Message send(Principal p, @PathVariable UUID conversation, @Valid @RequestBody Api.SendMessage request) {
         return chat.send(id(p), conversation, request);
+    }
+    @DeleteMapping("/{conversation}/messages/{messageId}") @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteMessage(Principal p, @PathVariable UUID conversation, @PathVariable UUID messageId) {
+        chat.deleteMessage(id(p), conversation, messageId);
     }
     @PostMapping("/receipts")
     public Api.Message receipt(Principal p, @Valid @RequestBody Api.Receipt request) { return chat.receipt(id(p), request); }
